@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Multi Tier Proxier</title>
+    <style>
+        /* General Body Styles */
+        body {
+            width: 300px;
+            height: 400px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a202c;
+            margin: 0;
+            border-radius: 10px;
+            color: #e2e8f0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* View Containers */
+        .view {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            box-sizing: border-box;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+
+        .view.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            flex-shrink: 0;
+        }
+
+        .header h3 {
+            font-size: 20px;
+            font-weight: bold;
+            color: #cbd5e0;
+            margin: 0;
+            text-align: center;
+            flex-grow: 1;
+        }
+
+        .header .placeholder {
+            width: 34px;
+        }
+
+        #menuBtn,
+        #closeBtn {
+            background: none;
+            border: none;
+            color: #cbd5e0;
+            cursor: pointer;
+            padding: 5px;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Main Content Area for Centering */
+        .content-area {
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Main Power Button */
+        #powerBtn {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            border: 4px solid;
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            flex-shrink: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: background-color 0.3s, border-color 0.3s;
+        }
+
+        #powerBtn.disconnected {
+            background-color: #c0392b;
+            border-color: #922b21;
+        }
+
+        #powerBtn.connected {
+            background-color: #27ae60;
+            border-color: #1e8449;
+            animation: breathing-glow 2s ease-in-out infinite;
+        }
+
+        #powerBtn.connecting {
+            background-color: #f39c12;
+            border-color: #d35400;
+            animation: connecting-pulse 1.5s ease-in-out infinite;
+        }
+
+        /* Menu Tabs & Content */
+        .tab-nav {
+            display: flex;
+            border-bottom: 1px solid #4a5568;
+            margin-bottom: 15px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 10px;
+            background: none;
+            border: none;
+            color: #a0aec0;
+            cursor: pointer;
+            font-size: 13px;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab-btn.active {
+            color: #e2e8f0;
+            border-bottom-color: #3498db;
+        }
+
+        .tab-content {
+            display: none;
+            flex-grow: 1;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
+        #addSiteBtn {
+            padding: 8px;
+            font-size: 12px;
+            background-color: #2c5282;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .domain-list-container {
+            background-color: #2d3748;
+            border-radius: 8px;
+            flex-grow: 1;
+            overflow-y: auto;
+            border: 1px solid #4a5568;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .domain-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #a0aec0;
+            border-bottom: 1px solid #4a5568;
+            flex-shrink: 0;
+        }
+
+        .domain-item:last-child {
+            border-bottom: none;
+        }
+
+        .delete-btn {
+            background-color: #c53030;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .domain-item:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .empty-message {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-grow: 1;
+            color: #a0aec0;
+            font-style: italic;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 13px;
+        }
+
+        /* Toast Notification */
+        #toast {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            transition: opacity 0.5s, visibility 0.5s;
+            opacity: 0;
+            visibility: hidden;
+            white-space: nowrap;
+        }
+
+        #toast.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #toast.success {
+            background-color: #2f855a;
+        }
+
+        #toast.error {
+            background-color: #c53030;
+        }
+
+        #toast.warning {
+            background-color: #dd6b20;
+        }
+
+        /* Footer for Version */
+        footer {
+            width: 100%;
+            text-align: center;
+            color: #718096;
+            padding-bottom: 12px;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        /* Keyframe Animations */
+        @keyframes connecting-pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.4);
+            }
+
+            70% {
+                transform: scale(1.05);
+                box-shadow: 0 0 10px 20px rgba(243, 156, 18, 0);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(243, 156, 18, 0);
+            }
+        }
+
+        @keyframes breathing-glow {
+            0% {
+                box-shadow: 0 0 5px rgba(39, 174, 96, 0.3), 0 0 10px rgba(39, 174, 96, 0.2);
+            }
+
+            50% {
+                box-shadow: 0 0 20px rgba(39, 174, 96, 0.6), 0 0 30px rgba(39, 174, 96, 0.4);
+            }
+
+            100% {
+                box-shadow: 0 0 5px rgba(39, 174, 96, 0.3), 0 0 10px rgba(39, 174, 96, 0.2);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Main View -->
+    <div id="mainView" class="view">
+        <div class="header">
+            <div class="placeholder"></div>
+            <h3>Multi Tier Proxier</h3>
+            <button id="menuBtn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="content-area">
+            <button id="powerBtn"></button>
+        </div>
+        <footer>
+            <span id="version-display"></span> | <span>Copyright © 2025 MTProxier.com</span>
+        </footer>
+    </div>
+
+    <!-- Menu View -->
+    <div id="menuView" class="view hidden">
+        <div class="header">
+            <button id="closeBtn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+            </button>
+            <h3>Manage Lists</h3>
+            <div class="placeholder"></div>
+        </div>
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="customList">My Custom List</button>
+            <button class="tab-btn" data-tab="defaultList">Default List</button>
+        </div>
+
+        <div id="customList" class="tab-content active">
+            <button id="addSiteBtn">Add current site to list</button>
+            <div class="domain-list-container">
+                <div id="customDomainList"></div>
+            </div>
+        </div>
+
+        <div id="defaultList" class="tab-content">
+            <div class="domain-list-container">
+                <div id="defaultDomainList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast"></div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>

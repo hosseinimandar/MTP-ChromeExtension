@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Multi Tier Proxier",
+  "author": "MTProxier.com",
+  "version": "1.0",
+  "description": "Multi Tier Proxy Extension.",
+  "permissions": [
+    "proxy",
+    "storage",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "icons": {
+    "128": "icon.png"
+  }
+}
