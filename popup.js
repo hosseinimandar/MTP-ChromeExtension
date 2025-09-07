@@ -1,176 +1,295 @@
 // --- DOM Elements ---
-const powerBtn = document.getElementById('powerBtn');
-const addSiteBtn = document.getElementById('addSiteBtn');
-const defaultDomainListDiv = document.getElementById('defaultDomainList');
-const customDomainListDiv = document.getElementById('customDomainList');
-const menuBtn = document.getElementById('menuBtn');
-const closeBtn = document.getElementById('closeBtn');
+const loginView = document.getElementById('loginView');
+const registerView = document.getElementById('registerView');
 const mainView = document.getElementById('mainView');
-const menuView = document.getElementById('menuView');
-const toast = document.getElementById('toast');
-const tabButtons = document.querySelectorAll('.tab-btn');
-const tabContents = document.querySelectorAll('.tab-content');
-const versionDisplay = document.getElementById('version-display');
-let toastTimer;
+const forgotPasswordView = document.getElementById('forgotPasswordView');
 
-// --- Functions ---
+const loginForm = document.getElementById('loginForm');
+const registerForm = document.getElementById('registerForm');
+const forgotPasswordForm = document.getElementById('forgotPasswordForm');
 
-// Shows a temporary message
-function showToast(message, type = 'success') {
-    clearTimeout(toastTimer);
-    toast.textContent = message;
-    toast.className = 'toast show';
-    toast.classList.add(type);
-    toastTimer = setTimeout(() => {
-        toast.classList.remove('show');
-    }, 5000);
+const showRegisterLink = document.getElementById('showRegister');
+const showLoginLink = document.getElementById('showLogin');
+const showForgotPasswordLink = document.getElementById('showForgotPassword');
+const backToLoginLink = document.getElementById('backToLogin');
+
+const rememberMeCheckbox = document.getElementById('rememberMe');
+const powerBtn = document.getElementById('powerBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const paymentBtn = document.getElementById('paymentBtn');
+const welcomeMessage = document.getElementById('welcomeMessage');
+const subStatus = document.getElementById('subStatus');
+const subExpiry = document.getElementById('subExpiry');
+
+// --- Configuration ---
+const API_BASE_URL = 'http://ex.mtproxier.com:3000';
+
+// --- State Management ---
+let currentUser = null;
+
+// --- View Navigation & Validation ---
+function showView(viewToShow) {
+    [loginView, registerView, mainView, forgotPasswordView].forEach(view => {
+        view.classList.add('hidden');
+    });
+    clearErrors();
+    viewToShow.classList.remove('hidden');
 }
 
-// Updates the power button UI based on state
-function updatePowerButtonUI(state) {
-    powerBtn.classList.remove('connected', 'disconnected', 'connecting');
-    switch(state) {
-        case 'connected':
-            powerBtn.textContent = 'Connected';
-            powerBtn.classList.add('connected');
-            break;
-        case 'disconnected':
-            powerBtn.textContent = 'Disconnected';
-            powerBtn.classList.add('disconnected');
-            break;
-        case 'connecting':
-            powerBtn.textContent = 'Connecting...';
-            powerBtn.classList.add('connecting');
-            break;
-    }
+function showError(inputElement, message) {
+    const errorSpan = inputElement.nextElementSibling;
+    errorSpan.textContent = message;
 }
 
-// Renders a list of domains
-function renderDomainList(domains, container, isCustom) {
-    container.innerHTML = '';
-    if (domains && domains.length > 0) {
-        domains.forEach(domain => {
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'domain-item';
-            const domainSpan = document.createElement('span');
-            domainSpan.textContent = domain;
-            itemDiv.appendChild(domainSpan);
-            if (isCustom) {
-                const deleteBtn = document.createElement('button');
-                deleteBtn.className = 'delete-btn';
-                deleteBtn.textContent = 'Delete';
-                deleteBtn.dataset.domain = domain;
-                itemDiv.appendChild(deleteBtn);
+function clearErrors() {
+    document.querySelectorAll('.error-message').forEach(span => {
+        span.textContent = '';
+    });
+}
+
+// --- Helpers ---
+function formatYmd(dateStr) {
+    const d = new Date(dateStr);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function setPowerState(state, label) {
+    // state: 'connected' | 'disconnected' | 'connecting' | 'disabled'
+    powerBtn.classList.remove('connected', 'disconnected', 'connecting', 'disabled');
+    powerBtn.classList.add(state);
+    if (label) powerBtn.textContent = label;
+    powerBtn.disabled = (state === 'disabled' || state === 'connecting');
+}
+
+// --- UI Update Functions ---
+function updateMainView() {
+    if (!currentUser) return;
+
+    welcomeMessage.textContent = `Hi, ${currentUser.email}`;
+
+    const isSubActive = currentUser.subExpires
+        ? new Date(currentUser.subExpires) > new Date()
+        : false;
+    currentUser.subActive = isSubActive;
+
+    if (currentUser.subActive) {
+        subStatus.textContent = 'Active';
+        subStatus.className = 'status-active';
+
+        const formattedDate = formatYmd(currentUser.subExpires);
+        subExpiry.textContent = `Expires on: ${formattedDate}`;
+        paymentBtn.textContent = 'Renew Subscription';
+
+        chrome.storage.local.get('isConnected', (result) => {
+            const isConnected = result.isConnected || false;
+            if (isConnected) {
+                setPowerState('connected', 'Connected');
+            } else {
+                setPowerState('disconnected', 'Disconnected');
             }
-            container.appendChild(itemDiv);
         });
     } else {
-        container.innerHTML = `<div class="empty-message">No domains in list</div>`;
-    }
-}
+        subStatus.textContent = 'Inactive';
+        subStatus.className = 'status-inactive';
+        subExpiry.textContent = 'Please subscribe to use the service.';
+        paymentBtn.textContent = 'Buy Subscription';
 
-// Handles domain deletion
-function deleteDomain(domainToDelete) {
-    chrome.storage.local.get('customDomains', (result) => {
-        const newDomains = (result.customDomains || []).filter(d => d !== domainToDelete);
-        chrome.storage.local.set({ customDomains: newDomains }, () => {
-            renderDomainList(newDomains, customDomainListDiv, true);
-            chrome.runtime.sendMessage({ action: 'updateRules' });
-            showToast('URL address removed', 'error');
-        });
-    });
+        setPowerState('disabled', 'Buy Subscription');
+    }
 }
 
 // --- Event Listeners ---
-
-// On popup open, load data
 document.addEventListener('DOMContentLoaded', () => {
     const manifest = chrome.runtime.getManifest();
-    versionDisplay.textContent = `Version: ${manifest.version}`;
+    const versionString = `Version: ${manifest.version}`;
+    document.getElementById('version-display-login').textContent = versionString;
+    document.getElementById('version-display-register').textContent = versionString;
+    document.getElementById('version-display-main').textContent = versionString;
+    document.getElementById('version-display-forgot').textContent = versionString;
 
-    chrome.storage.local.get(['isConnected', 'customDomains'], (result) => {
-        updatePowerButtonUI(result.isConnected ? 'connected' : 'disconnected');
-        renderDomainList(result.customDomains || [], customDomainListDiv, true);
-    });
-    chrome.runtime.sendMessage({ action: 'getDefaults' }, (response) => {
-        renderDomainList(response, defaultDomainListDiv, false);
-    });
-});
-
-// Power button click with animation logic
-powerBtn.addEventListener('click', () => {
-    chrome.storage.local.get('isConnected', (result) => {
-        const willConnect = !result.isConnected;
-        
-        if (willConnect) {
-            updatePowerButtonUI('connecting');
-            setTimeout(() => {
-                chrome.runtime.sendMessage({ action: 'connect' });
-                chrome.storage.local.set({ isConnected: true });
-                updatePowerButtonUI('connected');
-            }, 1500); // 1.5 second animation
-        } else {
-            chrome.runtime.sendMessage({ action: 'disconnect' });
-            chrome.storage.local.set({ isConnected: false });
-            updatePowerButtonUI('disconnected');
+    // Prefill login if saved
+    chrome.storage.local.get(['savedEmail', 'savedPassword'], (result) => {
+        if (result.savedEmail && result.savedPassword) {
+            document.getElementById('loginEmail').value = result.savedEmail;
+            document.getElementById('loginPassword').value = result.savedPassword;
+            rememberMeCheckbox.checked = true;
         }
     });
-});
 
-// "Add Current Site" button click
-addSiteBtn.addEventListener('click', () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0] && tabs[0].url) {
-            try {
-                const url = new URL(tabs[0].url);
-                const domain = url.hostname.replace(/^www\./, '');
+    // Load user and refresh status from server
+    chrome.storage.local.get('currentUser', (result) => {
+        if (result.currentUser) {
+            currentUser = result.currentUser;
 
-                chrome.runtime.sendMessage({ action: 'getDefaults' }, (defaultDomains) => {
-                    if (defaultDomains.includes(domain)) {
-                        showToast('This URL is in the default list', 'warning');
-                        return;
+            // Refresh subscription status from backend using apiKey
+            fetch(`${API_BASE_URL}/api/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ apiKey: currentUser.apiKey })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data && data.email) {
+                        currentUser = data;
+                        chrome.storage.local.set({ currentUser: data });
                     }
-
-                    chrome.storage.local.get('customDomains', (result) => {
-                        const currentDomains = result.customDomains || [];
-                        if (currentDomains.includes(domain)) {
-                            showToast('URL is already in the list', 'warning');
-                        } else {
-                            const newDomains = [...currentDomains, domain];
-                            chrome.storage.local.set({ customDomains: newDomains }, () => {
-                                renderDomainList(newDomains, customDomainListDiv, true);
-                                chrome.runtime.sendMessage({ action: 'updateRules' });
-                                showToast('URL address added', 'success');
-                            });
-                        }
-                    });
+                    updateMainView();
+                })
+                .catch(err => {
+                    console.error('Failed to refresh subscription status:', err);
+                    updateMainView();
                 });
-            } catch (e) { console.error("Could not parse URL:", e); }
+
+            showView(mainView);
+        } else {
+            showView(loginView);
         }
     });
 });
 
-// Event delegation for delete buttons
-customDomainListDiv.addEventListener('click', (event) => {
-    if (event.target.classList.contains('delete-btn')) {
-        deleteDomain(event.target.dataset.domain);
+showRegisterLink.addEventListener('click', () => showView(registerView));
+showLoginLink.addEventListener('click', () => showView(loginView));
+showForgotPasswordLink.addEventListener('click', () => showView(forgotPasswordView));
+backToLoginLink.addEventListener('click', () => showView(loginView));
+
+loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearErrors();
+    const emailInput = document.getElementById('loginEmail');
+    const passwordInput = document.getElementById('loginPassword');
+
+    if (rememberMeCheckbox.checked) {
+        chrome.storage.local.set({
+            savedEmail: emailInput.value,
+            savedPassword: passwordInput.value
+        });
+    } else {
+        chrome.storage.local.remove(['savedEmail', 'savedPassword']);
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: emailInput.value, password: passwordInput.value })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            showError(passwordInput, data.error || 'Login failed.');
+        } else {
+            currentUser = data;
+            chrome.storage.local.set({ currentUser: data });
+            updateMainView();
+            showView(mainView);
+        }
+    } catch (error) {
+        showError(passwordInput, 'Cannot connect to server.');
     }
 });
 
-// Menu and Tab controls
-menuBtn.addEventListener('click', () => {
-    mainView.classList.add('hidden');
-    menuView.classList.remove('hidden');
+registerForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearErrors();
+    const emailInput = document.getElementById('registerEmail');
+    const passwordInput = document.getElementById('registerPassword');
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: emailInput.value, password: passwordInput.value })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            showError(emailInput, data.error || 'Registration failed.');
+        } else {
+            alert('Registration successful! Please log in.');
+            showView(loginView);
+        }
+    } catch (error) {
+        showError(passwordInput, 'Cannot connect to server.');
+    }
 });
-closeBtn.addEventListener('click', () => {
-    menuView.classList.add('hidden');
-    mainView.classList.remove('hidden');
+
+forgotPasswordForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    alert('Forgot password functionality is not yet connected to the backend.');
 });
-tabButtons.forEach(button => {
-    button.addEventListener('click', () => {
-        tabButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        tabContents.forEach(content => content.classList.remove('active'));
-        document.getElementById(button.dataset.tab).classList.add('active');
+
+logoutBtn.addEventListener('click', () => {
+    currentUser = null;
+    chrome.storage.local.remove('currentUser');
+    chrome.runtime.sendMessage({ action: 'disconnect' });
+    chrome.storage.local.set({ isConnected: false });
+    showView(loginView);
+});
+
+// Add smooth "connecting" state for better UX
+powerBtn.addEventListener('click', () => {
+    if (!currentUser || !currentUser.subActive) {
+        alert('Please purchase a subscription to connect.');
+        return;
+    }
+
+    chrome.storage.local.get('isConnected', (result) => {
+        const newConnectionState = !result.isConnected;
+
+        // Show connecting animation when turning ON
+        if (newConnectionState) {
+            setPowerState('connecting', 'Connecting...');
+        } else {
+            setPowerState('disconnected', 'Disconnected');
+        }
+
+        chrome.runtime.sendMessage({ action: newConnectionState ? 'connect' : 'disconnect' });
+        chrome.storage.local.set({ isConnected: newConnectionState }, () => {
+            // Small delay to let background apply proxy settings, then refresh UI
+            setTimeout(() => {
+                updateMainView();
+            }, 500);
+        });
     });
+});
+
+paymentBtn.addEventListener('click', async () => {
+    if (!currentUser) {
+        alert('Please log in first.');
+        return;
+    }
+
+    paymentBtn.textContent = 'Creating invoice...';
+    paymentBtn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/create-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: currentUser.apiKey })
+        });
+
+        const data = await response.json();
+        console.log('Backend response:', data);
+
+        if (!response.ok) {
+            console.error('Payment creation failed:', data);
+            alert(`Error: ${data.error || 'Could not create payment link.'}`);
+        } else if (data.invoice_url) {
+            chrome.tabs.create({ url: data.invoice_url });
+        } else {
+            console.error('Backend response is OK but invoice_url is missing.');
+            alert('An unexpected error occurred. The payment link is missing.');
+        }
+    } catch (error) {
+        console.error('Fetch error:', error);
+        alert('Could not connect to the server to create a payment link.');
+    } finally {
+        updateMainView();
+        paymentBtn.disabled = false;
+        paymentBtn.textContent = currentUser?.subActive ? 'Renew Subscription' : 'Buy Subscription';
+    }
 });

@@ -1,100 +1,99 @@
-// --- Server Configuration ---
+// --- Proxy server config ---
 const PROXY_HOST = 'ex.mtproxier.com';
 const PROXY_PORT = 443;
 
-// --- Default list of domains (read-only) ---
+// --- Default proxied domains (read-only) ---
 const defaultProxiedDomains = [
     "trello.com", "telegram.org", "x.com", "gemini.google.com",
     "chatgpt.com", "openai.com",
     "youtube.com", "googlevideo.com", "ytimg.com", "twimg.com", "pbs.twimg.com"
 ];
 
-// --- Core Functions ---
-
-// Creates the PAC script string from a combined list of domains
+// --- PAC builder ---
 function createPacScript(domains) {
-    const uniqueDomains = [...new Set(domains)].filter(Boolean);
-    if (uniqueDomains.length === 0) {
-        return `function FindProxyForURL(url, host) { return "DIRECT"; }`;
+    const unique = [...new Set(domains)].filter(Boolean);
+    if (unique.length === 0) {
+        return `function FindProxyForURL(url, host){ return "DIRECT"; }`;
     }
-    let conditions = uniqueDomains.map(domain => `dnsDomainIs(host, ".${domain}") || dnsDomainIs(host, "${domain}")`).join(" || ");
-
+    const cond = unique
+        .map(d => `dnsDomainIs(host,".${d}") || dnsDomainIs(host,"${d}")`)
+        .join(" || ");
     return `
-        function FindProxyForURL(url, host) {
-            if (${conditions}) {
-                return "HTTPS ${PROXY_HOST}:${PROXY_PORT}";
-            }
-            return "DIRECT";
-        }
-    `;
+    function FindProxyForURL(url, host) {
+      if (${cond}) { return "HTTPS ${PROXY_HOST}:${PROXY_PORT}"; }
+      return "DIRECT";
+    }
+  `;
 }
 
-// Fetches both domain lists, combines them, and applies proxy settings
-function updateProxyRules() {
-    chrome.storage.local.get("customDomains", (result) => {
-        const customDomains = result.customDomains || [];
-        const combinedDomains = [...defaultProxiedDomains, ...customDomains];
+// --- Apply PAC from defaults+custom ---
+function updateProxyRules(done) {
+    chrome.storage.local.get("customDomains", (res) => {
+        const custom = res.customDomains || [];
+        const combined = [...defaultProxiedDomains, ...custom];
 
         const pacConfig = {
             mode: "pac_script",
-            pacScript: { data: createPacScript(combinedDomains) }
+            pacScript: { data: createPacScript(combined) }
         };
-        chrome.proxy.settings.set({ value: pacConfig, scope: 'regular' }, () => {
-            console.log("Proxy rules updated with", combinedDomains.length, "total domains.");
+
+        chrome.proxy.settings.set({ value: pacConfig, scope: "regular" }, () => {
+            const err = chrome.runtime.lastError;
+            if (err) {
+                console.error("proxy.settings.set error:", err);
+            } else {
+                console.log("Proxy rules updated. Domains:", combined.length);
+            }
+            if (typeof done === 'function') done(err);
         });
     });
 }
 
-// --- NEW Centralized Proxy Control Functions ---
-
-// Enables the proxy and updates all related states
+// --- Main controls ---
 function enableProxy() {
-    updateProxyRules();
-    chrome.action.setBadgeText({ text: 'ON' });
-    chrome.action.setBadgeBackgroundColor({ color: '#27ae60' }); // Green color
-    console.log("Proxy enabled and badge set to ON.");
-}
-
-// Disables the proxy and updates all related states
-function disableProxy() {
-    chrome.proxy.settings.clear({ scope: 'regular' });
-    chrome.action.setBadgeText({ text: 'OFF' });
-    chrome.action.setBadgeBackgroundColor({ color: '#c0392b' }); // Red color
-    console.log("Proxy disabled and badge set to OFF.");
-}
-
-// --- Event Listeners ---
-
-// Listen for messages from the popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'connect') {
-        enableProxy();
-    } else if (message.action === 'disconnect') {
-        disableProxy();
-    } else if (message.action === 'updateRules') {
-        chrome.storage.local.get("isConnected", (result) => {
-            if (result.isConnected) {
-                updateProxyRules();
-            }
+    updateProxyRules(() => {
+        chrome.storage.local.set({ isConnected: true }, () => {
+            chrome.action.setBadgeText({ text: 'ON' });
+            chrome.action.setBadgeBackgroundColor({ color: '#27ae60' });
+            console.log("Proxy enabled.");
         });
-    } else if (message.action === 'getDefaults') {
+    });
+}
+
+function disableProxy() {
+    chrome.proxy.settings.clear({ scope: "regular" }, () => {
+        const err = chrome.runtime.lastError;
+        if (err) console.error("proxy.settings.clear error:", err);
+        chrome.storage.local.set({ isConnected: false }, () => {
+            chrome.action.setBadgeText({ text: 'OFF' });
+            chrome.action.setBadgeBackgroundColor({ color: '#c0392b' });
+            console.log("Proxy disabled.");
+        });
+    });
+}
+
+// --- Messages from popup ---
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'connect') {
+        enableProxy();
+    } else if (msg.action === 'disconnect') {
+        disableProxy();
+    } else if (msg.action === 'updateRules') {
+        chrome.storage.local.get('isConnected', (r) => {
+            if (r.isConnected) updateProxyRules();
+        });
+    } else if (msg.action === 'getDefaults') {
         sendResponse(defaultProxiedDomains);
     }
-    return true; // Indicates that the response is sent asynchronously
+    return true; // async responses allowed
 });
 
-// Set the initial state when the extension is installed or updated
+// --- Init on install/update ---
 chrome.runtime.onInstalled.addListener(() => {
-    chrome.storage.local.get(["isConnected", "customDomains"], (result) => {
-        if (result.isConnected === undefined) {
-            chrome.storage.local.set({ isConnected: false });
-        }
-        if (result.customDomains === undefined) {
-            chrome.storage.local.set({ customDomains: [] });
-        }
-
-        // Set initial badge based on stored state or default to OFF
-        if (result.isConnected) {
+    chrome.storage.local.get(['isConnected', 'customDomains'], (r) => {
+        if (typeof r.isConnected !== 'boolean') chrome.storage.local.set({ isConnected: false });
+        if (!Array.isArray(r.customDomains)) chrome.storage.local.set({ customDomains: [] });
+        if (r.isConnected) {
             enableProxy();
         } else {
             disableProxy();
@@ -102,7 +101,7 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
-// Listen for any proxy errors
+// Optional: log low-level proxy errors (بدون تغییر UI)
 chrome.proxy.onProxyError.addListener((error) => {
-    console.error('Proxy error:', JSON.stringify(error, null, 2));
+    console.error('chrome.proxy error:', error);
 });

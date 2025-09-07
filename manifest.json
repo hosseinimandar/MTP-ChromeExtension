@@ -1,9 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Multi Tier Proxier",
-  "author": "MTProxier.com",
-  "version": "1.0",
-  "description": "Multi Tier Proxy Extension.",
+  "version": "2.0",
+  "description": "A dynamic and secure proxy extension.",
   "permissions": [
     "proxy",
     "storage",
